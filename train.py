@@ -49,7 +49,7 @@ def main(config):
     train_set[0][0].shape, len(train_set), train_set.n_classes))
   train_loader = DataLoader(
     train_set, config['train']['n_episode'],
-    collate_fn=datasets.collate_fn, num_workers=1, pin_memory=True)
+    collate_fn=datasets.collate_fn, num_workers=0, pin_memory=True)
 
   # meta-val
   eval_val = False
@@ -60,7 +60,7 @@ def main(config):
       val_set[0][0].shape, len(val_set), val_set.n_classes))
     val_loader = DataLoader(
       val_set, config['val']['n_episode'],
-      collate_fn=datasets.collate_fn, num_workers=1, pin_memory=True)
+      collate_fn=datasets.collate_fn, num_workers=0, pin_memory=True)
   
   ##### Model and Optimizer #####
 
@@ -116,10 +116,11 @@ def main(config):
     writer.add_scalar('lr', optimizer.param_groups[0]['lr'], epoch)
     np.random.seed(epoch)
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     for data in tqdm(train_loader, desc='meta-train', leave=False):
       x_shot, x_query, y_shot, y_query = data
-      x_shot, y_shot = x_shot.cuda(), y_shot.cuda()
-      x_query, y_query = x_query.cuda(), y_query.cuda()
+      x_shot, y_shot = x_shot.to(device), y_shot.to(device)
+      x_query, y_query = x_query.to(device), y_query.to(device)
 
       if inner_args['reset_classifier']:
         if config.get('_parallel'):
@@ -150,8 +151,8 @@ def main(config):
 
       for data in tqdm(val_loader, desc='meta-val', leave=False):
         x_shot, x_query, y_shot, y_query = data
-        x_shot, y_shot = x_shot.cuda(), y_shot.cuda()
-        x_query, y_query = x_query.cuda(), y_query.cuda()
+        x_shot, y_shot = x_shot.to(device), y_shot.to(device)
+        x_query, y_query = x_query.to(device), y_query.to(device)
 
         if inner_args['reset_classifier']:
           if config.get('_parallel'):
@@ -261,5 +262,9 @@ if __name__ == '__main__':
     config['_parallel'] = True
     config['_gpu'] = args.gpu
 
-  utils.set_gpu(args.gpu)
+    # ✅ GPU varsa kullan, yoksa CPU'da devam et
+    if torch.cuda.is_available() and args.gpu != '-1':
+        utils.set_gpu(args.gpu)
+    else:
+        print("⚠️ CUDA not available — running on CPU mode.")
   main(config)

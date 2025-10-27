@@ -1,6 +1,7 @@
 import os
 import shutil
 import time
+import torch
 
 import numpy as np
 import scipy.stats as stats
@@ -51,9 +52,20 @@ class Timer(object):
     return time.time() - self.v
 
 
-def set_gpu(gpu):
-  print('set gpu:', gpu)
-  os.environ['CUDA_VISIBLE_DEVICES'] = gpu
+def set_gpu(gpu: str):
+    """Safely set GPU device if available, otherwise stay on CPU."""
+    if not torch.cuda.is_available() or gpu == '-1':
+        print("⚠️ CUDA not available or GPU disabled, running on CPU.")
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''
+        return
+
+    try:
+        os.environ['CUDA_VISIBLE_DEVICES'] = gpu
+        torch.cuda.set_device(0)
+        print(f"✅ Using CUDA device(s): {gpu}")
+    except Exception as e:
+        print(f"⚠️ Could not set CUDA device, fallback to CPU. ({e})")
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
 
 def ensure_path(path, remove=True):
