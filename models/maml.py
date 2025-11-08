@@ -140,12 +140,12 @@ class MAML(Module):
       params (dict): model paramters AFTER inner-loop adaptation.
     """
     assert x.dim() == 4 and y.dim() == 1
-    assert x.size(0) == y.size(0)
+    assert x.size(0) == y.size(0)  #AGAG ilgili epizotta örnek sayısıyla etiket sayısı eşit mi kontrolü
 
     # Initializes a dictionary of momentum buffer for gradient descent in the 
     # inner loop. It has the same set of keys as the parameter dictionary.
     mom_buffer = OrderedDict()
-    if inner_args['momentum'] > 0:
+    if inner_args['momentum'] > 0:  #AGAG Klasik gradient descent yerine momentum gradient descent. Normal MAML'da yok, ufak bir ekleme. Çok önemli değil
       for name, param in params.items():
         mom_buffer[name] = torch.zeros_like(param)
     params_keys = tuple(params.keys())
@@ -155,6 +155,7 @@ class MAML(Module):
       if isinstance(m, BatchNorm2d) and m.is_episodic():
         m.reset_episodic_running_stats(episode)
 
+    #AGAG aşağıdaki self.efficient true ise daha az ram kullanmak amacıyla checkpoint mantığının çalıştırılması için kullanılan bir şey. Normalde kullanılmıyor.
     def _inner_iter_cp(episode, *state):
       """ 
       Performs one inner-loop iteration when checkpointing is enabled. 
@@ -174,7 +175,7 @@ class MAML(Module):
         for t in tuple(params.values()) + tuple(mom_buffer.values()))
       return state
 
-    for step in range(inner_args['n_step']):
+    for step in range(inner_args['n_step']): #AGAG buradaki step, bir taskteki support set üzerindeki verileri kaç kere işleyip kaç kere gradient'i güncelleyeceğimizi belirler.
       if self.efficient:  # checkpointing
         state = tuple(params.values()) + tuple(mom_buffer.values())
         state = cp.checkpoint(_inner_iter_cp, torch.as_tensor(episode), *state)
@@ -182,7 +183,7 @@ class MAML(Module):
         mom_buffer = OrderedDict(
           zip(mom_buffer_keys, state[-len(mom_buffer_keys):]))
       else:
-        params, mom_buffer = self._inner_iter(
+        params, mom_buffer = self._inner_iter( #AGAG task için tek bir iterasyon
           x, y, params, mom_buffer, episode, inner_args, not meta_train)
         
     return params
@@ -206,6 +207,7 @@ class MAML(Module):
     assert x_shot.size(0) == x_query.size(0)
 
     # a dictionary of parameters that will be updated in the inner loop
+    #AGAG Gereksiz yani gradyanı hesaplanmayacak parametrelerin çıkartılması
     params = OrderedDict(self.named_parameters())
     for name in list(params.keys()):
       if not params[name].requires_grad or \
@@ -213,14 +215,15 @@ class MAML(Module):
         params.pop(name)
 
     logits = []
-    for ep in range(x_shot.size(0)):
+    for ep in range(x_shot.size(0)): #AGAG x_shot.size(0) -> n_episode yani o batch içerisinde kaç tane task olduğu.
       # inner-loop training
+      ##AGAG train moduna alınması dropout, batch normalization gibi şeylerin.
       self.train()
       if not meta_train:
         for m in self.modules():
           if isinstance(m, BatchNorm2d) and not m.is_episodic():
             m.eval()
-      updated_params = self._adapt(
+      updated_params = self._adapt(  #AGAG Modelin inner loop'u -> θ′=θ−α∇θLsupport
         x_shot[ep], y_shot[ep], params, ep, inner_args, meta_train)
       # inner-loop validation
       with torch.set_grad_enabled(meta_train):
