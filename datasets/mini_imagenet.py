@@ -1,5 +1,6 @@
 import os
 import pickle
+from functools import partial
 
 import torch
 from torch.utils.data import Dataset
@@ -9,7 +10,10 @@ from PIL import Image
 from .datasets import register
 from .transforms import get_transform
 
-
+def convert_raw_fn(x, mean, std):
+    mean = mean.to(device=x.device, dtype=x.dtype)
+    std  = std.to(device=x.device, dtype=x.dtype)
+    return x * std + mean
 @register('mini-imagenet')
 class MiniImageNet(Dataset):
   def __init__(self, root_path, split='train', image_size=84, 
@@ -54,12 +58,10 @@ class MiniImageNet(Dataset):
 
     self.transform = get_transform(transform, image_size, self.norm_params)
 
-    def convert_raw(x):
-      mean = torch.tensor(self.norm_params['mean']).view(3, 1, 1).type_as(x)
-      std = torch.tensor(self.norm_params['std']).view(3, 1, 1).type_as(x)
-      return x * std + mean
-    
-    self.convert_raw = convert_raw
+
+    mean_t = torch.tensor(self.norm_params['mean']).view(3, 1, 1)
+    std_t = torch.tensor(self.norm_params['std']).view(3, 1, 1)
+    self.convert_raw = partial(convert_raw_fn, mean=mean_t, std=std_t)
 
   def __len__(self):
     return len(self.data)

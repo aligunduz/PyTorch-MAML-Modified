@@ -16,7 +16,7 @@ val:
   normalization: False
   transform: null
   n_batch: 200
-  n_episode: 4
+  n_episode: 6
   n_way: 5
   n_shot: 1
   n_query: 15

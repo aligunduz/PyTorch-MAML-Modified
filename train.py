@@ -5,6 +5,8 @@ from collections import OrderedDict
 
 import yaml
 import torch
+#from torch.cuda.amp import autocast, GradScaler
+from torch import amp
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
@@ -25,7 +27,7 @@ def main(config):
   torch.cuda.manual_seed(0)
   # torch.backends.cudnn.deterministic = True
   # torch.backends.cudnn.benchmark = False
-
+  torch.backends.cudnn.benchmark = True
   ckpt_name = args.name
   if ckpt_name is None:
     ckpt_name = config['encoder']
@@ -49,7 +51,7 @@ def main(config):
     train_set[0][0].shape, len(train_set), train_set.n_classes))
   train_loader = DataLoader(
     train_set, config['train']['n_episode'],
-    collate_fn=datasets.collate_fn, num_workers=0, pin_memory=True)
+    collate_fn=datasets.collate_fn, num_workers=8, pin_memory=True,prefetch_factor=4,persistent_workers=True)
 
   # meta-val
   eval_val = False
@@ -60,7 +62,7 @@ def main(config):
       val_set[0][0].shape, len(val_set), val_set.n_classes))
     val_loader = DataLoader(
       val_set, config['val']['n_episode'],
-      collate_fn=datasets.collate_fn, num_workers=0, pin_memory=True)
+      collate_fn=datasets.collate_fn, num_workers=4, pin_memory=True,prefetch_factor=4,persistent_workers=True)
   
   ##### Model and Optimizer #####
 
@@ -96,6 +98,7 @@ def main(config):
   utils.log('num params: {}'.format(utils.compute_n_params(model)))
   timer_elapsed, timer_epoch = utils.Timer(), utils.Timer()
 
+  scaler = amp.GradScaler('cuda')  # NEW (AMP scaler)
   ##### Training and evaluation #####
     
   # 'tl': meta-train loss
@@ -119,8 +122,10 @@ def main(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     for data in tqdm(train_loader, desc='meta-train', leave=False):
       x_shot, x_query, y_shot, y_query = data
-      x_shot, y_shot = x_shot.to(device), y_shot.to(device)
-      x_query, y_query = x_query.to(device), y_query.to(device)
+      x_shot = x_shot.cuda(non_blocking=True)
+      y_shot = y_shot.cuda(non_blocking=True)
+      x_query = x_query.cuda(non_blocking=True)
+      y_query = y_query.cuda(non_blocking=True)
 
       if inner_args['reset_classifier']:
         if config.get('_parallel'):
@@ -128,21 +133,27 @@ def main(config):
         else:
           model.reset_classifier()
 
-      logits = model(x_shot, x_query, y_shot, inner_args, meta_train=True)
-      logits = logits.flatten(0, 1)
-      labels = y_query.flatten()
-      
-      pred = torch.argmax(logits, dim=-1)
-      acc = utils.compute_acc(pred, labels)
-      loss = F.cross_entropy(logits, labels)
+      optimizer.zero_grad(set_to_none=True)  # NEW (daha verimli)
+      with amp.autocast('cuda'):  # NEW
+          logits = model(x_shot, x_query, y_shot, inner_args, meta_train=True)
+          logits = logits.flatten(0, 1)
+          labels = y_query.flatten()
+
+          pred = torch.argmax(logits, dim=-1)
+          acc = utils.compute_acc(pred, labels)
+          loss = F.cross_entropy(logits, labels)
+
+      scaler.scale(loss).backward()  # NEW
+      scaler.unscale_(optimizer)  # NEW (clip öncesi gerekli)
+      for param in optimizer.param_groups[0]['params']:
+          nn.utils.clip_grad_value_(param, 10)
+      scaler.step(optimizer)  # NEW
+      scaler.update()  # NEW
+
+
       aves['tl'].update(loss.item(), 1)
       aves['ta'].update(acc, 1)
       
-      optimizer.zero_grad()
-      loss.backward()
-      for param in optimizer.param_groups[0]['params']:
-        nn.utils.clip_grad_value_(param, 10)
-      optimizer.step()
 
     # meta-val
     if eval_val:
@@ -151,8 +162,8 @@ def main(config):
 
       for data in tqdm(val_loader, desc='meta-val', leave=False):
         x_shot, x_query, y_shot, y_query = data
-        x_shot, y_shot = x_shot.to(device), y_shot.to(device)
-        x_query, y_query = x_query.to(device), y_query.to(device)
+        x_shot, y_shot = x_shot.cuda(), y_shot.cuda()
+        x_query, y_query = x_query.cuda(), y_query.cuda()
 
         if inner_args['reset_classifier']:
           if config.get('_parallel'):
@@ -160,13 +171,14 @@ def main(config):
           else:
             model.reset_classifier()
 
-        logits = model(x_shot, x_query, y_shot, inner_args, meta_train=False)
-        logits = logits.flatten(0, 1)
-        labels = y_query.flatten()
-        
-        pred = torch.argmax(logits, dim=-1)
-        acc = utils.compute_acc(pred, labels)
-        loss = F.cross_entropy(logits, labels)
+        with torch.no_grad(), amp.autocast('cuda'):  # NEW (val’de de AMP aç)
+            logits = model(x_shot, x_query, y_shot, inner_args, meta_train=False)
+            logits = logits.flatten(0, 1)
+            labels = y_query.flatten()
+
+            pred = torch.argmax(logits, dim=-1)
+            acc = utils.compute_acc(pred, labels)
+            loss = F.cross_entropy(logits, labels)
         aves['vl'].update(loss.item(), 1)
         aves['va'].update(acc, 1)
 
