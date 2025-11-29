@@ -13,7 +13,7 @@ import numpy as np
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
-
+from torchviz import make_dot
 import datasets
 import models
 import utils
@@ -120,6 +120,7 @@ def main(config):
     np.random.seed(epoch)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    did_viz = False
     for data in tqdm(train_loader, desc='meta-train', leave=False):
       x_shot, x_query, y_shot, y_query = data
       x_shot = x_shot.cuda(non_blocking=True)
@@ -143,6 +144,15 @@ def main(config):
           acc = utils.compute_acc(pred, labels)
           loss = F.cross_entropy(logits, labels)
 
+      if not did_viz:
+          from torchviz import make_dot
+          # AMP bloğunun DIŞINDA çağır
+          dot = make_dot(loss, params=dict(model.named_parameters()))
+          dot.save("maml_graph.dot")
+          did_viz = True
+
+      ##AGAG Burada theta'yı güncelliyoruz.
+      ##AGAG backward ile varolan önceki güncellemeleri de hesaba katarak theta güncellenir.
       scaler.scale(loss).backward()  # NEW
       scaler.unscale_(optimizer)  # NEW (clip öncesi gerekli)
       for param in optimizer.param_groups[0]['params']:

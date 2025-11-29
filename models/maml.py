@@ -93,6 +93,7 @@ class MAML(Module):
     """
     with torch.enable_grad():
       # forward pass
+      # AGAG Loss'ların bulunduğu yer.
       logits = self._inner_forward(x, params, episode)
       loss = F.cross_entropy(logits, y)
       # backward pass
@@ -116,7 +117,7 @@ class MAML(Module):
             lr = inner_args['classifier_lr']
           else:
             raise ValueError('invalid parameter name')
-          updated_param = param - lr * grad
+          updated_param = param - lr * grad  #AGAG θi′=θi−α∇θiLsupport(θ)
         if detach:
           updated_param = updated_param.detach().requires_grad_(True)
         updated_params[name] = updated_param
