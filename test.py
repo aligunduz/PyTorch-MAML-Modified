@@ -3,6 +3,7 @@ import random
 
 import yaml
 import torch
+from torch import amp
 import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
@@ -11,7 +12,7 @@ from torch.utils.data import DataLoader
 import datasets
 import models
 import utils
-
+import utils.optimizers as optimizers
 
 def main(config):
   random.seed(0)
@@ -20,14 +21,14 @@ def main(config):
   torch.cuda.manual_seed(0)
   # torch.backends.cudnn.deterministic = True
   # torch.backends.cudnn.benchmark = False
-
+  torch.backends.cudnn.benchmark = True
   ##### Dataset #####
 
   dataset = datasets.make(config['dataset'], **config['test'])
   utils.log('meta-test set: {} (x{}), {}'.format(
     dataset[0][0].shape, len(dataset), dataset.n_classes))
   loader = DataLoader(dataset, config['test']['n_episode'],
-    collate_fn=datasets.collate_fn, num_workers=8, pin_memory=True)
+    collate_fn=datasets.collate_fn, num_workers=8, pin_memory=True,prefetch_factor=4,persistent_workers=True)
 
   ##### Model #####
 
@@ -52,8 +53,11 @@ def main(config):
   for epoch in range(1, config['epoch'] + 1):
     for data in tqdm(loader, leave=False):
       x_shot, x_query, y_shot, y_query = data
-      x_shot, y_shot = x_shot.cuda(), y_shot.cuda()
-      x_query, y_query = x_query.cuda(), y_query.cuda()
+      x_shot = x_shot.cuda(non_blocking=True)
+      y_shot = y_shot.cuda(non_blocking=True)
+      x_query = x_query.cuda(non_blocking=True)
+      y_query = y_query.cuda(non_blocking=True)
+
 
       if inner_args['reset_classifier']:
         if config.get('_parallel'):
@@ -61,12 +65,19 @@ def main(config):
         else:
           model.reset_classifier()
 
-      logits = model(x_shot, x_query, y_shot, inner_args, meta_train=False)
-      logits = logits.view(-1, config['test']['n_way'])
-      labels = y_query.view(-1)
-      
-      pred = torch.argmax(logits, dim=1)
-      acc = utils.compute_acc(pred, labels)
+      with amp.autocast('cuda'):  # NEW
+          logits = model(x_shot, x_query, y_shot, inner_args, meta_train=False)
+          logits = logits.view(-1, config['test']['n_way'])
+          labels = y_query.view(-1)
+
+          pred = torch.argmax(logits, dim=1)
+          acc = utils.compute_acc(pred, labels)
+      # logits = model(x_shot, x_query, y_shot, inner_args, meta_train=False)
+      # logits = logits.view(-1, config['test']['n_way'])
+      # labels = y_query.view(-1)
+      #
+      # pred = torch.argmax(logits, dim=1)
+      # acc = utils.compute_acc(pred, labels)
       aves_va.update(acc, 1)
       va_lst.append(acc)
 
@@ -93,4 +104,9 @@ if __name__ == '__main__':
     config['_gpu'] = args.gpu
 
   utils.set_gpu(args.gpu)
+  # ✅ GPU varsa kullan, yoksa CPU'da devam et
+  if torch.cuda.is_available() and args.gpu != '-1':
+      utils.set_gpu(args.gpu)
+  else:
+      print("⚠️ CUDA not available — running on CPU mode.")
   main(config)

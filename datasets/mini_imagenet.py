@@ -25,7 +25,7 @@ class MiniImageNet(Dataset):
                   'test': 'train_phase_test',          # standard test
                   'meta-train': 'train_phase_train',   # meta-train
                   'meta-val': 'val',                   # meta-val
-                  'meta-test': 'test',                 # meta-test
+                  'meta-test': 'train_phase_test',                 # meta-test
                  }
     split_tag = split_dict[split]
 

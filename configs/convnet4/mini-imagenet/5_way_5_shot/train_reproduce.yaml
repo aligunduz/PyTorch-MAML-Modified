@@ -1,4 +1,5 @@
 dataset: meta-mini-imagenet
+data_root: "C:/Users/aligunduz/PycharmProjects/PyTorch-MAML/data/miniImageNet/"
 train:
   split: meta-train
   image_size: 84
@@ -15,7 +16,7 @@ val:
   normalization: False
   transform: null
   n_batch: 200
-  n_episode: 4
+  n_episode: 6
   n_way: 5
   n_shot: 5
   n_query: 15
