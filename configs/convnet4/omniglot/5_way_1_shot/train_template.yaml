@@ -49,4 +49,4 @@ optimizer_args:
     - 120
     - 140
 
-epoch: 150
+epoch: 100

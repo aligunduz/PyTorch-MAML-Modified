@@ -39,4 +39,4 @@ optimizer: adam
 optimizer_args:
   lr: 0.001
 
-epoch: 300
+epoch: 100
