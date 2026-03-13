@@ -1,5 +1,6 @@
 from .datasets import make, collate_fn
 from . import mini_imagenet
+from . import omniglot
 from . import tiered_imagenet
 from . import cifar100
 from . import cub200
